@@ -1,0 +1,18 @@
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import { app } from '../src/app.js';
+import { pool } from '../src/db.js';
+import { hashPassword } from '../src/auth.js';
+const db = new PGlite();
+pool.query = (...args) => db.query(...args);
+pool.connect = async () => ({ query: (...args) => db.query(...args), release: () => {} });
+await db.exec(await readFile(new URL('../sql/001_schema.sql',import.meta.url),'utf8'));
+for (const [code,name] of [['customer','Покупець'],['catalog_manager','Контент-менеджер'],['order_manager','Менеджер замовлень'],['admin','Адміністратор']]) await db.query('INSERT INTO roles(code,name) VALUES ($1,$2)',[code,name]);
+for (const name of ['Аудіо','Гаджети','Дім','Подорожі']) await db.query('INSERT INTO categories(name) VALUES ($1)',[name]);
+for (const [code,name,price] of [['nova','Нова пошта',120],['courier','Кур’єр',160]]) await db.query('INSERT INTO delivery_methods(code,name,base_price) VALUES ($1,$2,$3)',[code,name,price]);
+for (const [code,name] of [['card','Оплата карткою'],['cod','Післяплата']]) await db.query('INSERT INTO payment_methods(code,name) VALUES ($1,$2)',[code,name]);
+const products=JSON.parse(await readFile(new URL('../sql/seed-products.json',import.meta.url),'utf8'));
+for (const p of products) await db.query('INSERT INTO products (id,sku,category_id,name,price,stock,short_description,description,features,art,color,accent,rating,reviews,badge,popularity,created_at) VALUES ($1,$2,(SELECT id FROM categories WHERE name=$3),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',[p.id,p.sku,p.category,p.name,p.price,p.stock,p.shortDescription,p.description,JSON.stringify(p.features),p.art,p.color,p.accent,p.rating,p.reviews,p.badge || null,p.popularity,p.createdAt]);
+const admin = await db.query("INSERT INTO users (email,first_name,last_name,password_hash) VALUES ('admin@example.com','Павло','Молитовник',$1) RETURNING id",[await hashPassword('strong-admin-password')]);
+await db.query("INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code='admin'",[admin.rows[0].id]);
+app.listen(4000,'127.0.0.1',()=>console.log('test API ready'));
